@@ -68,10 +68,15 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
         mutableContext[SDWebImageContextSetImageOperationKey] = validOperationKey;
         context = [mutableContext copy];
     }
+    
+    // 取消此视图的原有下载任务
     self.sd_latestOperationKey = validOperationKey;
     [self sd_cancelImageLoadOperationWithKey:validOperationKey];
+    
+    // 保存URL
     self.sd_imageURL = url;
     
+    // 获取下载管理器
     SDWebImageManager *manager = context[SDWebImageContextCustomManager];
     if (!manager) {
         manager = [SDWebImageManager sharedManager];
@@ -86,21 +91,28 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
     if ([manager.imageCache isKindOfClass:SDImageCache.class]) {
         shouldUseWeakCache = ((SDImageCache *)manager.imageCache).config.shouldUseWeakMemoryCache;
     }
+    
+    
     if (!(options & SDWebImageDelayPlaceholder)) {
         if (shouldUseWeakCache) {
+            // 弱缓存
+            // 获取Key 使用URL作为Key
             NSString *key = [manager cacheKeyForURL:url context:context];
             // call memory cache to trigger weak cache sync logic, ignore the return value and go on normal query
             // this unfortunately will cause twice memory cache query, but it's fast enough
             // in the future the weak cache feature may be re-design or removed
+            // 从缓存中获取
             [((SDImageCache *)manager.imageCache) imageFromMemoryCacheForKey:key];
         }
+        // 主线程执行
         dispatch_main_async_safe(^{
+            // 图片设置 结果回调
             [self sd_setImage:placeholder imageData:nil basedOnClassOrViaCustomSetImageBlock:setImageBlock cacheType:SDImageCacheTypeNone imageURL:url];
         });
     }
     
     if (url) {
-        // reset the progress
+        // reset the progress 初始化进度
         NSProgress *imageProgress = objc_getAssociatedObject(self, @selector(sd_imageProgress));
         if (imageProgress) {
             imageProgress.totalUnitCount = 0;
@@ -108,11 +120,11 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
         }
         
 #if SD_UIKIT || SD_MAC
-        // check and start image indicator
+        // check and start image indicator 检查并开始图片下载指示器
         [self sd_startImageIndicator];
         id<SDWebImageIndicator> imageIndicator = self.sd_imageIndicator;
 #endif
-        
+        // 设置图片下载进度回调
         SDImageLoaderProgressBlock combinedProgressBlock = ^(NSInteger receivedSize, NSInteger expectedSize, NSURL * _Nullable targetURL) {
             if (imageProgress) {
                 imageProgress.totalUnitCount = expectedSize;
@@ -134,22 +146,26 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
                 progressBlock(receivedSize, expectedSize, targetURL);
             }
         };
+        
+        // 创建图片请求操作
         @weakify(self);
         id <SDWebImageOperation> operation = [manager loadImageWithURL:url options:options context:context progress:combinedProgressBlock completed:^(UIImage *image, NSData *data, NSError *error, SDImageCacheType cacheType, BOOL finished, NSURL *imageURL) {
             @strongify(self);
             if (!self) { return; }
-            // if the progress not been updated, mark it to complete state
+            // if the progress not been updated, mark it to complete state 如果进度没有完成 标记为完成
             if (imageProgress && finished && !error && imageProgress.totalUnitCount == 0 && imageProgress.completedUnitCount == 0) {
                 imageProgress.totalUnitCount = SDWebImageProgressUnitCountUnknown;
                 imageProgress.completedUnitCount = SDWebImageProgressUnitCountUnknown;
             }
             
 #if SD_UIKIT || SD_MAC
-            // check and stop image indicator
+            // check and stop image indicator 停止进度指示器
             if (finished) {
                 [self sd_stopImageIndicator];
             }
 #endif
+            
+            // 图片设置
             
             BOOL shouldCallCompletedBlock = finished || (options & SDWebImageAvoidAutoSetImage);
             BOOL shouldNotSetImage = ((image && (options & SDWebImageAvoidAutoSetImage)) ||
@@ -186,6 +202,7 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
             
 #if SD_UIKIT || SD_MAC
             // check whether we should use the image transition
+            // 检查是否需要使用设置图片动画
             SDWebImageTransition *transition = nil;
             BOOL shouldUseTransition = NO;
             if (options & SDWebImageForceTransition) {
@@ -200,8 +217,10 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
                     shouldUseTransition = NO;
                 } else if (cacheType == SDImageCacheTypeDisk) {
                     if (options & SDWebImageQueryMemoryDataSync || options & SDWebImageQueryDiskDataSync) {
+                        // 磁盘同步获取不设置动画
                         shouldUseTransition = NO;
                     } else {
+                        // 异步获取设置动画
                         shouldUseTransition = YES;
                     }
                 } else {
@@ -209,21 +228,37 @@ const int64_t SDWebImageProgressUnitCountUnknown = 1LL;
                     shouldUseTransition = NO;
                 }
             }
+            
+            // 如果完成, 并且使用动画
             if (finished && shouldUseTransition) {
                 transition = self.sd_imageTransition;
             }
 #endif
+            
+            
             dispatch_main_async_safe(^{
 #if SD_UIKIT || SD_MAC
+                // 设置图片 并回调
                 [self sd_setImage:targetImage imageData:targetData basedOnClassOrViaCustomSetImageBlock:setImageBlock transition:transition cacheType:cacheType imageURL:imageURL];
 #else
                 [self sd_setImage:targetImage imageData:targetData basedOnClassOrViaCustomSetImageBlock:setImageBlock cacheType:cacheType imageURL:imageURL];
 #endif
+                
+                // 完成 更新显示并回调
                 callCompletedBlockClosure();
+                
             });
         }];
+        
+        
+        // 任务放到任务字典中
         [self sd_setImageLoadOperation:operation forKey:validOperationKey];
+        
+        
     } else {
+        
+        // url为空直接停止下载
+        
 #if SD_UIKIT || SD_MAC
         [self sd_stopImageIndicator];
 #endif

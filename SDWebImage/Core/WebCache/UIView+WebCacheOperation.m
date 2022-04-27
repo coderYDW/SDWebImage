@@ -42,10 +42,14 @@ typedef NSMapTable<NSString *, id<SDWebImageOperation>> SDOperationsDictionary;
 
 - (void)sd_setImageLoadOperation:(nullable id<SDWebImageOperation>)operation forKey:(nullable NSString *)key {
     if (key) {
+        // 取消上次的任务
         [self sd_cancelImageLoadOperationWithKey:key];
+        
         if (operation) {
+            // 如果任务存在
             SDOperationsDictionary *operationDictionary = [self sd_operationDictionary];
             @synchronized (self) {
+                // 将任务添加到字典中 全局的需要加锁
                 [operationDictionary setObject:operation forKey:key];
             }
         }
